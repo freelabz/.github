@@ -48,4 +48,12 @@ People *love* thorough bug reports.
 ## Use a Consistent Coding Style
 
 * 2 spaces for indentation rather than tabs
-* You can try running `npm run lint` for
+* You can try running `npm run lint` for style unification
+
+## License
+
+By contributing, you agree that your contributions will be licensed under its MIT License.
+
+## References
+
+This document was adapted from the open-source contribution guidelines for [Facebook's Draft](https://github.com/facebook/draft-js/blob/master/CONTRIBUTING.md)
