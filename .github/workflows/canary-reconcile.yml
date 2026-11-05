@@ -23,6 +23,23 @@ name: canary-reconcile
 
 on:
   workflow_call:
+    inputs:
+      require_label:
+        description: >-
+          If set, a PR is integrated onto canary ONLY when it carries this label (opt-IN).
+          For busy repos (e.g. the PUBLIC core) where "non-draft + green" would auto-deploy far
+          too many PRs. Empty (default) = any eligible non-draft PR integrates (draft is the gate).
+        required: false
+        type: string
+        default: ''
+      non_blocking_checks:
+        description: >-
+          Comma-separated check-name PREFIXES whose runs do NOT count toward the all-green gate
+          (known-flaky / advisory checks). Default 'integration' (matches the documented
+          non-blocking policy); every other check still gates.
+        required: false
+        type: string
+        default: integration
     secrets:
       # Only secret the reconciler needs (checkout push → triggers publish-canary). Declared
       # so callers pass it EXPLICITLY instead of `secrets: inherit` (which would hand this
@@ -74,14 +91,19 @@ jobs:
 
       - name: Compute eligible PRs (open, non-draft, base main, head feat/|fix/, ALL checks green)
         uses: actions/github-script@v7
+        env:
+          REQUIRE_LABEL: ${{ inputs.require_label }}
+          NON_BLOCKING_CHECKS: ${{ inputs.non_blocking_checks }}
         with:
           script: |
             const fs = require('fs');
             const { owner, repo } = context.repo;
+            const requireLabel = (process.env.REQUIRE_LABEL || '').trim();
+            const nonBlocking = (process.env.NON_BLOCKING_CHECKS || '').split(',').map(s => s.trim()).filter(Boolean);
             const prs = await github.paginate(github.rest.pulls.list, {
               owner, repo, state: 'open', base: 'main', per_page: 100,
             });
-            const eligible = [], pending = [], failed = [], untrusted = [], docsonly = [], chores = [];
+            const eligible = [], pending = [], failed = [], untrusted = [], docsonly = [], chores = [], unlabeled = [];
             for (const pr of prs) {
               if (pr.draft) continue;
               // chore PRs (release-please releases, data/KEV refreshes, routine chores) are
@@ -101,12 +123,20 @@ jobs:
               const sameRepo = pr.head.repo && pr.head.repo.full_name === `${owner}/${repo}`;
               const adminAllowed = (pr.labels || []).some(l => l.name === 'allow-canary');
               if (!(sameRepo || adminAllowed)) { untrusted.push(pr.number); continue; }
+              // Opt-IN gate (busy repos, e.g. the PUBLIC core): only integrate PRs explicitly
+              // labelled for canary. Keeps the flood of routine core PRs OFF canary unless a
+              // maintainer asks. Empty require_label (other repos) = no opt-in needed.
+              if (requireLabel && !(pr.labels || []).some(l => l.name === requireLabel)) { unlabeled.push(pr.number); continue; }
               const sha = pr.head.sha;
               const runs = await github.paginate(github.rest.checks.listForRef, {
                 owner, repo, ref: sha, per_page: 100,
               });
-              const anyPending = runs.some(r => r.status !== 'completed');
-              const anyFail = runs.some(r =>
+              // Known-flaky / advisory checks (default: integration) don't count toward the
+              // green gate — matches the documented human-merge policy so a flaky run can't
+              // park an otherwise-good PR off canary.
+              const blocking = runs.filter(r => !nonBlocking.some(p => (r.name || '').startsWith(p)));
+              const anyPending = blocking.some(r => r.status !== 'completed');
+              const anyFail = blocking.some(r =>
                 ['failure','cancelled','timed_out','action_required','stale'].includes(r.conclusion));
               const comb = await github.rest.repos.getCombinedStatusForRef({ owner, repo, ref: sha });
               // getCombinedStatusForRef returns state="pending" when there are ZERO legacy
@@ -140,7 +170,7 @@ jobs:
             eligible.sort((a, b) => a.number - b.number);
             fs.writeFileSync('eligible.json', JSON.stringify(eligible));
             core.info(`eligible=${eligible.map(e => '#' + e.number).join(',') || '(none)'} `
-                    + `pending=${pending.join(',') || '-'} failed=${failed.join(',') || '-'} untrusted=${untrusted.join(',') || '-'} docsonly=${docsonly.join(',') || '-'} chores=${chores.join(',') || '-'}`);
+                    + `pending=${pending.join(',') || '-'} failed=${failed.join(',') || '-'} untrusted=${untrusted.join(',') || '-'} docsonly=${docsonly.join(',') || '-'} chores=${chores.join(',') || '-'} unlabeled=${unlabeled.join(',') || '-'}`);
 
       - name: Assemble canary = main + squash(each eligible PR)
         shell: bash
