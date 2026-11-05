@@ -35,11 +35,13 @@ on:
       non_blocking_checks:
         description: >-
           Comma-separated check-name PREFIXES whose runs do NOT count toward the all-green gate
-          (known-flaky / advisory checks). Default 'integration' (matches the documented
-          non-blocking policy); every other check still gates.
+          (known-flaky / advisory / self-referential checks). Default 'integration,reconcile':
+          'integration' is known-flaky; 'reconcile' is this workflow's OWN check on the PR, which
+          concurrency can leave CANCELLED and would otherwise falsely exclude the PR. Every other
+          check still gates.
         required: false
         type: string
-        default: integration
+        default: integration,reconcile
     secrets:
       # Only secret the reconciler needs (checkout push → triggers publish-canary). Declared
       # so callers pass it EXPLICITLY instead of `secrets: inherit` (which would hand this
@@ -119,7 +121,7 @@ jobs:
               const runs = await github.paginate(github.rest.checks.listForRef, {
                 owner, repo, ref: sha, per_page: 100,
               });
-              // Known-flaky / advisory checks (default: integration) don't count toward the
+              // Known-flaky / advisory / self-referential checks (default: integration,reconcile) don't count toward the
               // green gate — matches the documented human-merge policy so a flaky run can't
               // park an otherwise-good PR off canary.
               const blocking = runs.filter(r => !nonBlocking.some(p => (r.name || '').startsWith(p)));
