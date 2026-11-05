@@ -81,9 +81,12 @@ jobs:
             const prs = await github.paginate(github.rest.pulls.list, {
               owner, repo, state: 'open', base: 'main', per_page: 100,
             });
-            const eligible = [], pending = [], failed = [], untrusted = [], docsonly = [];
+            const eligible = [], pending = [], failed = [], untrusted = [], docsonly = [], chores = [];
             for (const pr of prs) {
               if (pr.draft) continue;
+              // chore PRs (release-please releases, data/KEV refreshes, routine chores) are
+              // open-by-default and happen regularly — never auto-deploy them.
+              if (/^chore\b/i.test((pr.title || '').trim())) { chores.push(pr.number); continue; }
               if (!/^(feat|fix)\//.test(pr.head.ref)) continue;
               // SECURITY (critical for the PUBLIC core repo): never auto-integrate code from
               // outside the team — an external PR, once non-draft + green, would be squashed
@@ -125,8 +128,11 @@ jobs:
               const isDocData = (fn) => {
                 const base = fn.split('/').pop();
                 if (buildCritical.test(base)) return false;
-                return /\.(md|mdx|markdown|rst|adoc|txt|csv|png|jpe?g|gif|svg|webp|ico|json)$/i.test(fn)
-                    || /^(docs|media)\//.test(fn);
+                if (/\.(md|mdx|markdown|rst|adoc|txt|csv|png|jpe?g|gif|svg|webp|ico)$/i.test(fn)) return true;
+                if (/^(docs|media)\//.test(fn)) return true;
+                // json is data ONLY under a data/ dir (e.g. the KEV mirror). json elsewhere
+                // (i18n locales, runtime config) is build-relevant and should deploy.
+                return /\.json$/i.test(fn) && /(^|\/)data\//.test(fn);
               };
               if (prFiles.length > 0 && prFiles.every(x => isDocData(x.filename))) { docsonly.push(pr.number); continue; }
               eligible.push({ number: pr.number, headRef: pr.head.ref, headSha: sha, title: pr.title });
@@ -134,7 +140,7 @@ jobs:
             eligible.sort((a, b) => a.number - b.number);
             fs.writeFileSync('eligible.json', JSON.stringify(eligible));
             core.info(`eligible=${eligible.map(e => '#' + e.number).join(',') || '(none)'} `
-                    + `pending=${pending.join(',') || '-'} failed=${failed.join(',') || '-'} untrusted=${untrusted.join(',') || '-'} docsonly=${docsonly.join(',') || '-'}`);
+                    + `pending=${pending.join(',') || '-'} failed=${failed.join(',') || '-'} untrusted=${untrusted.join(',') || '-'} docsonly=${docsonly.join(',') || '-'} chores=${chores.join(',') || '-'}`);
 
       - name: Assemble canary = main + squash(each eligible PR)
         shell: bash
