@@ -72,23 +72,11 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - name: Revoke allow-canary when an untrusted PR is updated (anti-TOCTOU)
-        if: github.event_name == 'pull_request' && github.event.action == 'synchronize'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const pr = context.payload.pull_request;
-            const { owner, repo } = context.repo;
-            const sameRepo = pr.head.repo && pr.head.repo.full_name === `${owner}/${repo}`;
-            const has = (pr.labels || []).some(l => l.name === 'allow-canary');
-            // A maintainer's allow-canary vouches for the code AT LABEL TIME. If an external
-            // (fork) PR is then updated, drop the label so new commits can't ride the old approval.
-            if (!sameRepo && has) {
-              await github.rest.issues.removeLabel({ owner, repo, issue_number: pr.number, name: 'allow-canary' }).catch(() => {});
-              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number,
-                body: '🔒 `allow-canary` auto-removed: this external PR was updated, so the prior approval no longer covers the new commits. A maintainer must re-review and re-add the label to let it into canary.' });
-            }
-
+      # NOTE: the fork anti-TOCTOU strip of `allow-canary` is NOT done here. A fork
+      # `pull_request: synchronize` event runs with a READ-ONLY token, so removeLabel would 403
+      # silently and the stale label would survive to a later full-token check_suite run. The
+      # strip therefore lives in each fork-accepting repo's own `pull_request_target` guard
+      # (e.g. core's canary-label-guard.yml), which gets a WRITE token in the base-repo context.
       - name: Compute eligible PRs (open, non-draft, base main, head feat/|fix/, ALL checks green)
         uses: actions/github-script@v7
         env:
