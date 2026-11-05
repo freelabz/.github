@@ -23,6 +23,13 @@ name: canary-reconcile
 
 on:
   workflow_call:
+    secrets:
+      # Only secret the reconciler needs (checkout push → triggers publish-canary). Declared
+      # so callers pass it EXPLICITLY instead of `secrets: inherit` (which would hand this
+      # public reusable ALL of the caller's secrets). Optional: without it the branch still
+      # tracks, it just won't trigger publish-canary (GITHUB_TOKEN pushes don't).
+      RELEASE_TOKEN:
+        required: false
 
 permissions:
   contents: write
