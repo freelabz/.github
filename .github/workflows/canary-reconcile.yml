@@ -81,7 +81,7 @@ jobs:
             const prs = await github.paginate(github.rest.pulls.list, {
               owner, repo, state: 'open', base: 'main', per_page: 100,
             });
-            const eligible = [], pending = [], failed = [], untrusted = [];
+            const eligible = [], pending = [], failed = [], untrusted = [], docsonly = [];
             for (const pr of prs) {
               if (pr.draft) continue;
               if (!/^(feat|fix)\//.test(pr.head.ref)) continue;
@@ -113,12 +113,28 @@ jobs:
               const st = hasStatuses ? comb.data.state : 'success'; // success | pending | failure
               if (anyFail || st === 'failure' || st === 'error') { failed.push(pr.number); continue; }
               if (anyPending || st === 'pending')               { pending.push(pr.number); continue; }
+              // Skip PRs that change ONLY docs/data — they don't alter the built image, so they
+              // must not force a rebuild / canary deploy. Build-relevant = any code, Dockerfile,
+              // dependency/lockfile, yaml (core task/workflow TEMPLATES are functionality), or a
+              // build-critical json (package.json, tsconfig…). Everything else (markdown, rst,
+              // txt, images, data .json like the KEV mirror) is docs/data.
+              const prFiles = await github.paginate(github.rest.pulls.listFiles, {
+                owner, repo, pull_number: pr.number, per_page: 100,
+              });
+              const buildCritical = /^(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|composer\.json|poetry\.lock|pyproject\.toml|requirements[\w.-]*\.txt|setup\.(py|cfg)|jsconfig\.json|tsconfig[\w.-]*\.json|Dockerfile[\w.-]*)$/;
+              const isDocData = (fn) => {
+                const base = fn.split('/').pop();
+                if (buildCritical.test(base)) return false;
+                return /\.(md|mdx|markdown|rst|adoc|txt|csv|png|jpe?g|gif|svg|webp|ico|json)$/i.test(fn)
+                    || /^(docs|media)\//.test(fn);
+              };
+              if (prFiles.length > 0 && prFiles.every(x => isDocData(x.filename))) { docsonly.push(pr.number); continue; }
               eligible.push({ number: pr.number, headRef: pr.head.ref, headSha: sha, title: pr.title });
             }
             eligible.sort((a, b) => a.number - b.number);
             fs.writeFileSync('eligible.json', JSON.stringify(eligible));
             core.info(`eligible=${eligible.map(e => '#' + e.number).join(',') || '(none)'} `
-                    + `pending=${pending.join(',') || '-'} failed=${failed.join(',') || '-'} untrusted=${untrusted.join(',') || '-'}`);
+                    + `pending=${pending.join(',') || '-'} failed=${failed.join(',') || '-'} untrusted=${untrusted.join(',') || '-'} docsonly=${docsonly.join(',') || '-'}`);
 
       - name: Assemble canary = main + squash(each eligible PR)
         shell: bash
