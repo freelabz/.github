@@ -1,0 +1,26 @@
+name: canary-reconcile-kick
+
+# Dispatches a repo's canary-reconcile on PR events, so its runs attach to main rather than to
+# the PR. Reconcile runs are cancelled freely by concurrency, and a cancelled check attached to a
+# PR would mark its status red even when every test passed.
+#
+# ORG REUSABLE WORKFLOW (freelabz/.github): each repo's thin caller owns the pull_request_target
+# trigger and grants `actions: write`. pull_request_target gives fork PRs a token that can
+# dispatch. It is safe here because this job never checks out or reads PR content: it only
+# triggers a workflow on main.
+
+on:
+  workflow_call:
+
+permissions:
+  actions: write
+
+jobs:
+  kick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch canary-reconcile
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run canary-reconcile.yml --ref main
