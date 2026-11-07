@@ -35,13 +35,14 @@ on:
       non_blocking_checks:
         description: >-
           Comma-separated check-name PREFIXES whose runs do NOT count toward the all-green gate
-          (known-flaky / advisory / self-referential checks). Default 'integration,reconcile':
+          (known-flaky / advisory / self-referential checks). Default 'integration,reconcile,kick':
           'integration' is known-flaky; 'reconcile' is this workflow's OWN check on the PR, which
-          concurrency can leave CANCELLED and would otherwise falsely exclude the PR. Every other
-          check still gates.
+          concurrency can leave CANCELLED and would otherwise falsely exclude the PR; 'kick' is
+          the check that dispatches this workflow, so it can still be running when the dispatched
+          run evaluates the PR. Every other check still gates.
         required: false
         type: string
-        default: integration,reconcile
+        default: integration,reconcile,kick
     secrets:
       # Only secret the reconciler needs (checkout push → triggers publish-canary). Declared
       # so callers pass it EXPLICITLY instead of `secrets: inherit` (which would hand this
